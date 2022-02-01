@@ -1,5 +1,4 @@
 # udimmer-firmware
 
-
 ## Hardware
-NodeMCU 0.9
+Used the dimmer-hardware project based on NodeMCU 0.9
