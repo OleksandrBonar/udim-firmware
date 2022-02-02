@@ -230,25 +230,25 @@ void loop() {
         // Once connected, publish an announcement...
         mqtt.publish("udimmer/system/getmode", mode ? "true" : "false");
         mqtt.publish("udimmer/system/getonline", "online");
-        mqtt.publish("udimmer/channel1/geton", state[0] ? "true" : "false");
+        mqtt.publish("udimmer/channel1/getstate", state[0] ? "ON" : "OFF");
         mqtt.publish("udimmer/channel1/getbrightness", String(dimming_cur[0]).c_str());
-        mqtt.publish("udimmer/channel2/geton", state[1] ? "true" : "false");
+        mqtt.publish("udimmer/channel2/getstate", state[1] ? "ON" : "OFF");
         mqtt.publish("udimmer/channel2/getbrightness", String(dimming_cur[1]).c_str());
-        mqtt.publish("udimmer/channel3/geton", state[2] ? "true" : "false");
+        mqtt.publish("udimmer/channel3/getstate", state[2] ? "ON" : "OFF");
         mqtt.publish("udimmer/channel3/getbrightness", String(dimming_cur[2]).c_str());
         // ... and resubscribe
         mqtt.subscribe("udimmer/system/setmode");
-        mqtt.subscribe("udimmer/channel1/seton");
+        mqtt.subscribe("udimmer/channel1/setstate");
         mqtt.subscribe("udimmer/channel1/setbrightness");
-        mqtt.subscribe("udimmer/channel2/seton");
+        mqtt.subscribe("udimmer/channel2/setstate");
         mqtt.subscribe("udimmer/channel2/setbrightness");
-        mqtt.subscribe("udimmer/channel3/seton");
+        mqtt.subscribe("udimmer/channel3/setstate");
         mqtt.subscribe("udimmer/channel3/setbrightness");
       } else {
         Serial.print("mqtt connection failed, rc=");
         Serial.print(mqtt.state());
         Serial.println(" try again in 2 seconds");
-        // Wait 5 seconds before retrying
+        // Wait 2 seconds before retrying
         delay(2000);
       }
     }
@@ -256,9 +256,10 @@ void loop() {
   
   // Every minute
   if (millis() - on_time >= 60000) {
+    mqtt.publish("udimmer/system/getfrequency", String(num_zero_cross / 2 / 60).c_str());
+    
     on_time = millis();
-
-    mqtt.publish("udimmer/system/getfrequency", String(num_zero_cross / 60).c_str());
+    num_zero_cross = 0;
   }
 
   mqtt.loop();
