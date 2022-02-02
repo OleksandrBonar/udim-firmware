@@ -32,9 +32,11 @@ int state[NUM_CHANNELS] = {0,0,0};
 volatile boolean is_handled[NUM_CHANNELS] = {0,0,0};
 volatile int lvl_counter[NUM_CHANNELS] = {0,0,0};
 
+int on_time = 0;
 int num_active_channels = 0;
 volatile boolean zero_cross = 0;
 volatile int num_handled = 0;
+volatile int num_zero_cross = 0;
 
 WiFiClient wifi;
 PubSubClient mqtt(wifi);
@@ -67,16 +69,26 @@ void update_state(int on_off, int channel_number) {
 }
 
 void update_dimming(float dimming_value, int channel_number) {
+  if (dimming_set[channel_number] == dimming_value) {
+    return;
+  }
+
   dimming_set[channel_number] = dimming_value;
   dimming_inc[channel_number] = abs(dimming_set[channel_number] - dimming_cur[channel_number]) / 100.0f;
   
-  Serial.print("channel_1 brightness = ");
-  Serial.println(dimming_set[channel_number]);
-  Serial.print("channel_1 increment = ");
-  Serial.println(dimming_inc[channel_number]);
+  Serial.print("channel_");
+  Serial.print(channel_number);
+  
+  Serial.print(" brightness: ");
+  Serial.print(dimming_set[channel_number]);
+  Serial.print(" (");
+  Serial.print(dimming_inc[channel_number]);
+  Serial.println(")");
 }
 
 ICACHE_RAM_ATTR void zero_crossing_int() {
+  num_zero_cross++;
+
   if (num_active_channels > 0) {
     num_handled = 0;
 
@@ -87,16 +99,16 @@ ICACHE_RAM_ATTR void zero_crossing_int() {
         digitalWrite(drive_pin[i], mode ? LOW : HIGH); // change mode
       }
       
-      if (dimming_cur[i] < dimming_set[i]) {
+      if (fabs(dimming_cur[i] - dimming_set[i]) < 0.01f) {
+        // nothing
+      } else if (dimming_cur[i] < dimming_set[i]) {
         dimming_cur[i] += dimming_inc[i];
-      } else if (dimming_cur[i] > dimming_set[i] + dimming_inc[i]) {
+      } else if (dimming_cur[i] > dimming_set[i]) {
         dimming_cur[i] -= dimming_inc[i];
       }
     }
 
     zero_cross = 1;
-    
-    timer1_write(STEP_TIME * 5);
   }
 }
 
@@ -118,22 +130,15 @@ ICACHE_RAM_ATTR void on_timer_isr() {
         }
       }
     }
-
-    if (zero_cross == 1) {
-      timer1_write(STEP_TIME * 5);
-    }
   }
 }
 
 void callback(char* t, byte* p, unsigned int l) {
-  char b[l];
-  for (int i = 0; i < l; i++) {
-    b[i] = p[i];
-  }
-  b[l] = '\0';
-
   String topic(t);
-  String param(b);
+  String param;
+  for (int i = 0; i < l; i++) {
+    param.concat((char)p[i]);
+  }
   
   if (topic == "udimmer/system/setmode") {
     mode = param == "true" ? 1 : 0;
@@ -142,27 +147,33 @@ void callback(char* t, byte* p, unsigned int l) {
     Serial.println(mode);
   }
 
-  if (topic == "udimmer/channel1/seton") {
-      update_state(param == "true" ? 1 : 0, 0);
-  } else if (topic == "udimmer/channel2/seton") {
-      update_state(param == "true" ? 1 : 0, 1);
-  } else if (topic == "udimmer/channel3/seton") {
-      update_state(param == "true" ? 1 : 0, 2);
+  if (topic == "udimmer/channel1/setstate") {
+      update_state(param == "ON" ? 1 : 0, 0);
+      mqtt.publish("udimmer/channel1/getstate", state[0] ? "ON" : "OFF", true);
+  } else if (topic == "udimmer/channel2/setstate") {
+      update_state(param == "ON" ? 1 : 0, 1);
+      mqtt.publish("udimmer/channel2/getstate", state[1] ? "ON" : "OFF", true);
+  } else if (topic == "udimmer/channel3/setstate") {
+      update_state(param == "ON" ? 1 : 0, 2);
+      mqtt.publish("udimmer/channel3/getstate", state[2] ? "ON" : "OFF", true);
   }
 
   if (topic == "udimmer/channel1/setbrightness") {
     dimming_usr[0] = mapf(param.toFloat(), 0.0f, 100.0f, MIN_LEVEL, MAX_LEVEL);
     update_dimming(dimming_usr[0], 0);
+    mqtt.publish("udimmer/channel1/getbrightness", String(param.toInt()).c_str());
   }
   
   if (topic == "udimmer/channel2/setbrightness") {
     dimming_usr[1] = mapf(param.toFloat(), 0.0f, 100.0f, MIN_LEVEL, MAX_LEVEL);
     update_dimming(dimming_usr[1], 1);
+    mqtt.publish("udimmer/channel2/getbrightness", String(param.toInt()).c_str());
   }
   
   if (topic == "udimmer/channel3/setbrightness") {
     dimming_usr[2] = mapf(param.toFloat(), 0.0f, 100.0f, MIN_LEVEL, MAX_LEVEL);
     update_dimming(dimming_usr[1], 1);
+    mqtt.publish("udimmer/channel3/getbrightness", String(param.toInt()).c_str());
   }
 }
 
@@ -200,11 +211,13 @@ void setup() {
 
   // Initialize Ticker
   timer1_attachInterrupt(on_timer_isr);
-  timer1_enable(TIM_DIV16, TIM_EDGE, TIM_SINGLE); // 5MHz (5 ticks/us - 1677721.4 us max)
-  // timer1_write(STEP_TIME * 5); // Ticks 5 = 1 us, 1ms = 1000us, 10ms = 10000us
+  timer1_enable(TIM_DIV16, TIM_EDGE, TIM_LOOP); // 5MHz (5 ticks/us - 1677721.4 us max) // TIM_SINGLE
+  timer1_write(STEP_TIME * 5); // Ticks 5 = 1 us, 1ms = 1000us, 10ms = 10000us
 
   attachInterrupt(ZERO_CROSSING_INT_PIN, zero_crossing_int, RISING);   
   interrupts();
+  
+  on_time = millis();
 }
 
 void loop() {
@@ -239,6 +252,13 @@ void loop() {
         delay(2000);
       }
     }
+  }
+  
+  // Every minute
+  if (millis() - on_time >= 60000) {
+    on_time = millis();
+
+    mqtt.publish("udimmer/system/getfrequency", String(num_zero_cross / 60).c_str());
   }
 
   mqtt.loop();
