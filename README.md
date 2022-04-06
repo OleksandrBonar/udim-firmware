@@ -1,7 +1,8 @@
 # udimmer-firmware
-Universal MQTT dimmer
+Universal dimmer
 
 ## Features
+ - MQTT (over WiFi)
  - Leading-edge and trailing-edge phase cutting
  - Smooth on and off
  - Min/Max level
